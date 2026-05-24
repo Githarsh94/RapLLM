@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import json
 import time
 from datetime import datetime, timezone
 from typing import Optional, Tuple
@@ -11,7 +13,7 @@ class LLMLogger:
     def __init__(
         self,
         ingestion_url: str,
-        model_name: str = "gemini-3.5-flash",
+        model_name: str = "gemini-2.5-flash-image",
         provider: str = "google",
     ):
         self.model_name = model_name
@@ -24,6 +26,7 @@ class LLMLogger:
         conversation_id: str,
         gemini_client,
         message_id: Optional[str] = None,
+        config=None,
     ) -> Tuple[str, InferenceLogPayload]:
         request_timestamp = datetime.now(timezone.utc)
         start = time.monotonic()
@@ -31,7 +34,6 @@ class LLMLogger:
         input_preview = ""
         if contents:
             last = contents[-1]
-            # Handle google.genai types.Content objects
             if hasattr(last, "parts"):
                 parts = last.parts
                 if parts and hasattr(parts[0], "text"):
@@ -44,14 +46,44 @@ class LLMLogger:
                     input_preview = text[:500]
 
         try:
-            response = await gemini_client.aio.models.generate_content(
-                model=self.model_name,
-                contents=contents,
-            )
+            call_kwargs: dict = {"model": self.model_name, "contents": contents}
+            if config is not None:
+                call_kwargs["config"] = config
+
+            response = await gemini_client.aio.models.generate_content(**call_kwargs)
             latency_ms = int((time.monotonic() - start) * 1000)
             response_timestamp = datetime.now(timezone.utc)
 
-            output_text = response.text
+            # Parse all parts — a response can contain text, images, or both
+            text_parts: list[str] = []
+            image_parts: list[dict] = []
+
+            for part in (response.parts or []):
+                if part.text:
+                    text_parts.append(part.text)
+                elif part.inline_data is not None:
+                    img_b64 = base64.b64encode(part.inline_data.data).decode("utf-8")
+                    image_parts.append({
+                        "type": "image",
+                        "data": img_b64,
+                        "mime_type": part.inline_data.mime_type or "image/png",
+                    })
+
+            if not text_parts and not image_parts:
+                raise ValueError(
+                    "Model returned no content. The request may have been blocked or unsupported."
+                )
+
+            if image_parts:
+                # Encode as structured JSON so the frontend can render images
+                structured: list[dict] = [{"type": "text", "text": t} for t in text_parts]
+                structured += image_parts
+                output_text = json.dumps({"__gemini_parts": True, "parts": structured})
+                output_preview = ("[image]" + (" " + " ".join(text_parts))[:400]).strip()
+            else:
+                output_text = "".join(text_parts)
+                output_preview = output_text[:500]
+
             usage = response.usage_metadata
             prompt_tokens = getattr(usage, "prompt_token_count", None)
             completion_tokens = getattr(usage, "candidates_token_count", None)
@@ -70,7 +102,7 @@ class LLMLogger:
                 response_timestamp=response_timestamp,
                 status="success",
                 input_preview=input_preview,
-                output_preview=output_text[:500] if output_text else None,
+                output_preview=output_preview,
                 raw_metadata={},
             )
             asyncio.create_task(self.dispatcher.dispatch(payload))

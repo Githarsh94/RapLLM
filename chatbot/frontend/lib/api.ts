@@ -45,10 +45,10 @@ export async function getConversation(id: string): Promise<Conversation> {
   return request(`/conversations/${id}`);
 }
 
-export async function sendMessage(conversationId: string, content: string): Promise<Message> {
+export async function sendMessage(conversationId: string, content: string, model?: string): Promise<Message> {
   return request(`/conversations/${conversationId}/messages`, {
     method: "POST",
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, model: model ?? null }),
   });
 }
 

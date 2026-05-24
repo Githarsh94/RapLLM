@@ -8,6 +8,7 @@ class CreateConversationRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str
+    model: str | None = None
 
 
 class MessageResponse(BaseModel):

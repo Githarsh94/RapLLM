@@ -18,6 +18,7 @@ export default function Home() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   useEffect(() => {
     listConversations().then(setConversations).catch(console.error);
@@ -53,8 +54,9 @@ export default function Home() {
     }
   };
 
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = async (content: string, model: string | null) => {
     if (!activeConversationId || !activeConversation) return;
+    setSendError(null);
 
     const optimisticUserMsg: Message = {
       id: crypto.randomUUID(),
@@ -70,7 +72,7 @@ export default function Home() {
     setIsLoading(true);
 
     try {
-      const assistantMsg = await sendMessage(activeConversationId, content);
+      const assistantMsg = await sendMessage(activeConversationId, content, model ?? undefined);
       setActiveConversation((prev) =>
         prev ? { ...prev, messages: [...(prev.messages ?? []), assistantMsg] } : null
       );
@@ -83,6 +85,7 @@ export default function Home() {
       );
     } catch (err) {
       console.error("Failed to send message:", err);
+      setSendError(err instanceof Error ? err.message : "Failed to send message");
     } finally {
       setIsLoading(false);
     }
@@ -101,6 +104,8 @@ export default function Home() {
         conversation={activeConversation}
         isLoading={isLoading}
         onSendMessage={handleSendMessage}
+        errorMessage={sendError}
+        onDismissError={() => setSendError(null)}
       />
     </main>
   );
